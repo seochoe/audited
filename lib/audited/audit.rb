@@ -37,8 +37,9 @@ module Audited
     belongs_to :auditable,  polymorphic: true
     belongs_to :user,       polymorphic: true
     belongs_to :associated, polymorphic: true
+    belongs_to :app_instance, :class_name => "ZuoraConnect::AppInstance" 
 
-    before_create :set_version_number, :set_audit_user, :set_request_uuid, :set_remote_address
+    before_create :set_version_number, :set_request_uuid, :set_remote_address, :set_app_instance_id, :set_entityIds
 
     cattr_accessor :audited_class_names
     self.audited_class_names = Set.new
@@ -55,6 +56,10 @@ module Audited
     scope :from_version,  ->(version){ where('version >= ?', version) }
     scope :to_version,    ->(version){ where('version <= ?', version) }
     scope :auditable_finder, ->(auditable_id, auditable_type){ where(auditable_id: auditable_id, auditable_type: auditable_type)}
+    
+    def self.table_name
+      'public.audits'
+    end
     # Return all audits older than the current one.
     def ancestors
       self.class.ascending.auditable_finder(auditable_id, auditable_type).to_version(version)
@@ -103,8 +108,8 @@ module Audited
       end
     end
 
-    # Allows user to be set to either a string or an ActiveRecord object
-    # @private
+    #Allows user to be set to either a string or an ActiveRecord object
+    @private
     def user_as_string=(user)
       # reset both either way
       self.user_as_model = self.username = nil
@@ -115,7 +120,7 @@ module Audited
     alias_method :user_as_model=, :user=
     alias_method :user=, :user_as_string=
 
-    # @private
+    @private
     def user_as_string
       user_as_model || username
     end
@@ -168,9 +173,9 @@ module Audited
     private
 
     def set_version_number
-      if action == 'create'
+      if action == 'create' 
         self.version = 1
-      else
+      else 
         max = self.class.auditable_finder(auditable_id, auditable_type).maximum(:version) || 0
         self.version = max + 1
       end
@@ -179,6 +184,7 @@ module Audited
     def set_audit_user
       self.user ||= ::Audited.store[:audited_user] # from .as_user
       self.user ||= ::Audited.store[:current_user].try!(:call) # from Sweeper
+      self.user = "seo"
       nil # prevent stopping callback chains
     end
 
@@ -189,6 +195,16 @@ module Audited
 
     def set_remote_address
       self.remote_address ||= ::Audited.store[:current_remote_address]
+    end
+
+    def set_app_instance_id
+      self.app_instance_id = Thread.current[:appinstance].id
+    end
+
+    def set_entityIds
+      self.entityIds = Thread.current[:appinstance].zuora_entity_ids
+      #{ZuoraConnect::AppInstance.zuora_entity_ids}
+
     end
   end
 end

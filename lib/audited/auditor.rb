@@ -81,13 +81,14 @@ module Audited
         Audited.audit_class.audited_class_names << to_s
 
         after_create :audit_create    if audited_options[:on].include?(:create)
-        before_update :audit_update   if audited_options[:on].include?(:update)
+        after_update :audit_update   if audited_options[:on].include?(:update)
         before_destroy :audit_destroy if audited_options[:on].include?(:destroy)
 
         # Define and set after_audit and around_audit callbacks. This might be useful if you want
         # to notify a party after the audit has been created or if you want to access the newly-created
         # audit.
         define_callbacks :audit
+        set_callback :audit, :around, :set_to_public
         set_callback :audit, :after, :after_audit, if: lambda { respond_to?(:after_audit, true) }
         set_callback :audit, :around, :around_audit, if: lambda { respond_to?(:around_audit, true) }
 
@@ -97,6 +98,13 @@ module Audited
       def has_associated_audits
         has_many :associated_audits, as: :associated, class_name: Audited.audit_class.name
       end
+    end
+
+    def set_to_public
+      previous_tenant = Apartment::Tenant.current
+      Apartment::Tenant.switch!("public")
+        yield
+      Apartment::Tenant.switch!(previous_tenant)
     end
 
     module AuditedInstanceMethods
@@ -169,7 +177,8 @@ module Audited
 
       # List of attributes that are audited.
       def audited_attributes
-        audited_attributes = attributes.except(*self.class.non_audited_columns)
+        audited_attributes = attributes
+        #attributes.except(*self.class.non_audited_columns)
         normalize_enum_changes(audited_attributes)
       end
 
@@ -228,7 +237,8 @@ module Audited
           if audited_options[:only].present?
             all_changes.slice(*self.class.audited_columns)
           else
-            all_changes.except(*self.class.non_audited_columns)
+            all_changes
+            #all_changes.except(*self.class.non_audited_columns)
           end
 
         filtered_changes = redact_values(filtered_changes)
@@ -291,8 +301,15 @@ module Audited
 
       def audit_update
         unless (changes = audited_changes).empty? && (audit_comment.blank? || audited_options[:update_with_comment_only] == false)
-          write_audit(action: 'update', audited_changes: changes,
-                      comment: audit_comment)
+          #if it's an instance workflow, don't update
+          #if audited_changes["status"].present? || audited_changes["task_summary"].present?
+           #else
+            write_audit(action: 'update', audited_changes: changes,
+                        comment: audit_comment)
+           #end 
+
+
+          
         end
       end
 
@@ -304,7 +321,6 @@ module Audited
       def write_audit(attrs)
         attrs[:associated] = send(audit_associated_with) unless audit_associated_with.nil?
         self.audit_comment = nil
-
         if auditing_enabled
           run_callbacks(:audit) {
             audit = audits.create(attrs)
@@ -370,18 +386,19 @@ module Audited
     module AuditedClassMethods
       # Returns an array of columns that are audited. See non_audited_columns
       def audited_columns
-        @audited_columns ||= column_names - non_audited_columns
+        @audited_columns ||= column_names 
+        #- non_audited_columns
       end
 
       # We have to calculate this here since column_names may not be available when `audited` is called
-      def non_audited_columns
-        @non_audited_columns ||= calculate_non_audited_columns
-      end
+      # def non_audited_columns
+      #   @non_audited_columns ||= calculate_non_audited_columns
+      # end
 
-      def non_audited_columns=(columns)
-        @audited_columns = nil # reset cached audited columns on assignment
-        @non_audited_columns = columns.map(&:to_s)
-      end
+      # def non_audited_columns=(columns)
+      #   @audited_columns = nil # reset cached audited columns on assignment
+      #   @non_audited_columns = columns.map(&:to_s)
+      # end
 
       # Executes the block with auditing disabled.
       #
@@ -458,6 +475,7 @@ module Audited
         else
           default_ignored_attributes
         end
+        
       end
     end
   end
